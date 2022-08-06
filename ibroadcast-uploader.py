@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import requests
 import json
@@ -161,7 +161,7 @@ class Uploader(object):
         if not directory:
             directory = os.getcwd()
 
-        for full_filename in glob.glob(os.path.join(directory, '*')):
+        for full_filename in glob.glob(os.path.join(glob.escape(directory), '*')):
             filename = os.path.basename(full_filename)
             # Skip hidden files.
             if filename.startswith('.'):
