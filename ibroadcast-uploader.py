@@ -27,10 +27,10 @@ class Uploader(object):
     Class for uploading content to iBroadcast.
     """
 
-    VERSION = '0.3'
+    VERSION = '0.4'
     CLIENT = 'python 3 uploader script'
     DEVICE_NAME = 'python 3 uploader script'
-    USER_AGENT = 'python 3 uploader script 0.3'
+    USER_AGENT = 'python 3 uploader script ' + VERSION
 
 
     def __init__(self, login_token):
@@ -41,7 +41,9 @@ class Uploader(object):
         self.token = None
         self.supported = None
         self.files = None
-        self.md5 = None
+        self.md5_int_path = None
+        self.md5_int = None
+        self.md5_ext = None
 
     def process(self):
         try:
@@ -56,6 +58,7 @@ class Uploader(object):
             print('Unable to fetch account info: %s' % e)
             return
 
+        print('Building file list...')
         self.load_files()
 
         if self.confirm():
@@ -200,7 +203,19 @@ class Uploader(object):
         print('Aborting')
         return False
 
-    def __load_md5(self):
+    def __load_md5_int(self):
+        """
+        Load internal md5 database to not calculate everything from scratch
+        """
+        self.md5_int_path = os.getenv('HOME') + '/.ibroadcast_md5s'
+        
+        if os.path.exists(self.md5_int_path):
+            with open(self.md5_int_path) as json_file:
+                self.md5_int = json.load(json_file)
+        else:
+            self.md5_int = {}
+
+    def __load_md5_ext(self):
         """
         Reach out to iBroadcast and get an md5.
         """
@@ -219,7 +234,7 @@ class Uploader(object):
 
         jsoned = response.json()
 
-        self.md5 = jsoned['md5']
+        self.md5_ext = jsoned['md5']
 
     def calcmd5(self, filePath="."):
         with open(filePath, 'rb') as fh:
@@ -235,7 +250,11 @@ class Uploader(object):
         """
         Go and perform an upload of any files that haven't yet been uploaded
         """
-        self.__load_md5()
+        self.__load_md5_int()
+        self.__load_md5_ext()
+        skipped = 0
+        failed = 0
+        uploaded = 0
 
         for filename in self.files:
 
@@ -243,10 +262,15 @@ class Uploader(object):
 
             # Get an md5 of the file contents and compare it to whats up
             # there already
-            file_md5 = self.calcmd5(filename)
+            if filename in self.md5_int:
+                file_md5 = self.md5_int[filename]
+            else:
+                file_md5 = self.calcmd5(filename)
+                self.md5_int[filename] = file_md5
 
-            if file_md5 in self.md5:
+            if file_md5 in self.md5_ext:
                 print('Skipping - already uploaded.')
+                skipped += 1
                 continue
             upload_file = open(filename, 'rb')
 
@@ -277,8 +301,16 @@ class Uploader(object):
             result = jsoned['result']
 
             if result is False:
+                failed += 1
                 raise ValueError('File upload failed.')
+            else:
+                uploaded += 1
+        
+        with open(self.md5_int_path, 'w') as fp:
+            json.dump(self.md5_int, fp, indent = 2)
+        
         print('Done')
+        print("Uploaded/Failed/Skipped/Total: %s/%s/%s/%s." % (uploaded,failed,skipped,len(self.files)))
 
 if __name__ == '__main__':
     # NB: this could use parsearg
