@@ -355,8 +355,8 @@ class Uploader(object):
         
         if self.be_verbose:
             print('Done')
-        if not self.be_silent:
-            print("Uploaded/Failed/Skipped/Total: %s/%s/%s/%s." % (uploaded,failed,skipped,len(self.files)))
+        
+        print("Uploaded/Failed/Skipped/Total: %s/%s/%s/%s." % (uploaded,failed,skipped,len(self.files)))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run this script in the parent directory of your music files. To acquire a login token, enable the \"Simple Uploaders\" app by visiting https://ibroadcast.com, logging in to your account, and clicking the \"Apps\" button in the side menu.\n")
