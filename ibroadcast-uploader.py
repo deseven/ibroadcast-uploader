@@ -28,7 +28,7 @@ class Uploader(object):
     Class for uploading content to iBroadcast.
     """
 
-    VERSION = '0.4'
+    VERSION = '0.5'
     CLIENT = 'python 3 uploader script'
     DEVICE_NAME = 'python 3 uploader script'
     USER_AGENT = 'ibroadcast-uploader/' + VERSION
