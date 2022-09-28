@@ -6,8 +6,8 @@ import glob
 import os
 import hashlib
 import sys
-import traceback
 import argparse
+import threading
 
 sys.tracebacklimit = 0
 
@@ -34,7 +34,7 @@ class Uploader(object):
     USER_AGENT = 'ibroadcast-uploader/' + VERSION
 
 
-    def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation):
+    def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation, parallel_uploads):
         if verbose:
             sys.tracebacklimit = 1000
         
@@ -53,6 +53,8 @@ class Uploader(object):
         self.token = None
         self.supported = None
         self.files = None
+        self.skipped_files = None
+        self.failed_files = None
         self.md5_int_path = None
         self.md5_int = None
         self.md5_ext = None
@@ -72,11 +74,12 @@ class Uploader(object):
 
         if not self.be_silent:
             print('Building file list...')
-        
+
         self.load_files()
 
         if self.confirm():
-            self.upload()
+            self.choose_upload_type()
+
 
     def login(self, login_token=None,):
         """
@@ -91,7 +94,7 @@ class Uploader(object):
 
         if self.be_verbose:
             print('Logging in...')
-        
+
         # Build a request object.
         post_data = json.dumps({
             'mode' : 'login_token',
@@ -120,7 +123,7 @@ class Uploader(object):
 
         if self.be_verbose:
             print('Login successful - user_id: ', jsoned['user']['id'])
-        
+
         self.user_id = jsoned['user']['id']
         self.token = jsoned['user']['token']
 
@@ -134,7 +137,7 @@ class Uploader(object):
         """
         if self.be_verbose:
             print('Fetching account info...')
-        
+
         # Build a request object.
         post_data = json.dumps({
             'mode' : 'status',
@@ -166,6 +169,8 @@ class Uploader(object):
 
         self.supported = []
         self.files = []
+        self.skipped_files = []
+        self.failed_files = []
 
         for filetype in jsoned['supported']:
              self.supported.append(filetype['extension'])
@@ -215,7 +220,7 @@ class Uploader(object):
             print()
             if response == 'L'.upper():
                 print('Listing found, supported files')
-                for filename in self.files:
+                for filename in sorted(self.files):
                     print(' - ', filename)
                 print()
                 print("Press 'U' to start the upload if this looks reasonable.")
@@ -234,7 +239,7 @@ class Uploader(object):
         Load internal md5 database to not calculate everything from scratch
         """
         self.md5_int_path = os.getenv('HOME') + '/.ibroadcast_md5s'
-        
+
         if os.path.exists(self.md5_int_path):
             with open(self.md5_int_path) as json_file:
                 self.md5_int = json.load(json_file)
@@ -261,14 +266,14 @@ class Uploader(object):
         jsoned = response.json()
 
         self.md5_ext = jsoned['md5']
-    
+ 
     def progressbar(self, it, prefix="", size=60, out=sys.stdout):
         count = len(it)
         def show(j):
             x = int(size*j/count)
-            print("{}[{}{}] {}/{}".format(prefix, "#"*x, "."*(size-x), j, count), 
+            print("{}[{}{}] {}/{}".format(prefix, "#"*x, "."*(size-x), j, count),
                 end='\r', file=out, flush=True)
-        if (not self.be_verbose) and (not self.be_silent):    
+        if (not self.be_verbose) and (not self.be_silent):
             show(0)
         for i, item in enumerate(it):
             yield item
@@ -287,20 +292,63 @@ class Uploader(object):
                 m.update(data)
         return m.hexdigest()
 
-    def upload(self):
+
+    def choose_upload_type(self):
+        amountOfThreads = args.parallel_uploads
+        amountOfFiles = len(self.files)
+        if (amountOfThreads > 1):
+            is_threaded = True
+            self.split_file_list(1)
+
+            fileIndex = 0
+            threads = []
+            while (fileIndex < amountOfFiles):
+                if (len(threads) < amountOfThreads):
+                    t = threading.Thread(target=self.upload, args=(fileIndex, is_threaded))
+                    t.start()
+                    threads.append(t)
+                    fileIndex += 1
+                else:
+                    # Wait for a thread to finish
+                    threads[0].join()
+                    del threads[0]
+
+            # Wait for any remaining thread to finish
+            for i in range(len(threads)):
+                threads[i].join()
+        else:
+            self.upload(0)
+
+        if (self.be_verbose and len(self.skipped_files) > 0):
+            print("\nThe following files were skipped because they were already uploaded:")
+            print(*sorted(self.skipped_files), sep='\n')
+        if (self.be_verbose):
+            print("Done")
+
+        skipped = len(self.skipped_files)
+        failed = len(self.failed_files)
+        uploaded = amountOfFiles - skipped - failed
+        print("Uploaded/Skipped/Failed/Total: %s/%s/%s/%s." % (uploaded,skipped,failed,amountOfFiles))
+
+
+    def split_file_list(self, slices):
+        self.files = [self.files[i * slices:(i + 1) * slices] for i in range((len(self.files) + slices - 1) // slices )]
+
+
+    def upload(self, fileIndex, threaded=False):
         """
         Go and perform an upload of any files that haven't yet been uploaded
         """
         self.__load_md5_int()
         self.__load_md5_ext()
-        skipped = 0
-        failed = 0
-        uploaded = 0
+        file_list = self.progressbar(self.files, "Processing: ", 60)
+        if threaded:
+            file_list = self.files[fileIndex]
 
-        for filename in self.progressbar(self.files, "Processing: ", 60):
-            if self.be_verbose:
-                print(filename)
-            
+        for filename in file_list:
+            if threaded:
+                print('Uploading:', filename)
+
             # Get an md5 of the file contents and compare it to whats up
             # there already
             if (not self.no_cache) and filename in self.md5_int:
@@ -312,10 +360,11 @@ class Uploader(object):
                 self.md5_int[filename] = file_md5
 
             if file_md5 in self.md5_ext:
+                self.skipped_files.append(filename)
                 if self.be_verbose:
-                    print('Skipping - already uploaded.')
-                skipped += 1
+                    print("Skipped (already uploaded):")
                 continue
+
             upload_file = open(filename, 'rb')
 
             file_data = {
@@ -333,7 +382,6 @@ class Uploader(object):
                 "https://upload.ibroadcast.com",
                 post_data,
                 files=file_data,
-
             )
 
             upload_file.close()
@@ -345,18 +393,12 @@ class Uploader(object):
             result = jsoned['result']
 
             if result is False:
-                failed += 1
+                self.failed_files.append(filename)
                 raise ValueError('File upload failed.')
-            else:
-                uploaded += 1
-        
+
         with open(self.md5_int_path, 'w') as fp:
             json.dump(self.md5_int, fp, indent = 2)
-        
-        if self.be_verbose:
-            print('Done')
-        
-        print("Uploaded/Failed/Skipped/Total: %s/%s/%s/%s." % (uploaded,failed,skipped,len(self.files)))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run this script in the parent directory of your music files. To acquire a login token, enable the \"Simple Uploaders\" app by visiting https://ibroadcast.com, logging in to your account, and clicking the \"Apps\" button in the side menu.\n")
@@ -365,10 +407,11 @@ if __name__ == '__main__':
     parser.add_argument('directory', type=str, nargs='?', help='Use this directory instead of the current one')
     parser.add_argument('-n', '--no-cache', action='store_true', help='Do not use local MD5 cache')
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('-p', '--parallel-uploads', type=int, nargs='?', const=1, default=1, choices=range(1,17), metavar="1-16", help='Number of parallel uploads. Disabled by default.')
     parser.add_argument('-s', '--silent', action='store_true', help='Be silent')
     parser.add_argument('-y', '--skip-confirmation', action='store_true', help='Skip confirmation dialogue')
 
     args = parser.parse_args()
-    uploader = Uploader(args.login_token,args.directory,args.no_cache,args.verbose,args.silent,args.skip_confirmation)
+    uploader = Uploader(args.login_token,args.directory,args.no_cache,args.verbose,args.silent,args.skip_confirmation,args.parallel_uploads)
 
     uploader.process()
