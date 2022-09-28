@@ -7,7 +7,7 @@ import os
 import hashlib
 import sys
 import argparse
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
 sys.tracebacklimit = 0
 
@@ -302,20 +302,12 @@ class Uploader(object):
 
             fileIndex = 0
             threads = []
-            while (fileIndex < amountOfFiles):
-                if (len(threads) < amountOfThreads):
-                    t = threading.Thread(target=self.upload, args=(fileIndex, is_threaded))
-                    t.start()
-                    threads.append(t)
+            with ThreadPoolExecutor(max_workers=amountOfThreads) as exe:
+                while (fileIndex < amountOfFiles):
+                    exe.submit(self.upload,fileIndex,is_threaded)
                     fileIndex += 1
-                else:
-                    # Wait for a thread to finish
-                    threads[0].join()
-                    del threads[0]
-
-            # Wait for any remaining thread to finish
-            for i in range(len(threads)):
-                threads[i].join()
+                # Wait for all tasks to finish before continuing
+                exe.shutdown(wait=True, cancel_futures=False)
         else:
             self.upload(0)
 
