@@ -338,7 +338,7 @@ class Uploader(object):
             file_list = self.files[fileIndex]
 
         for filename in file_list:
-            if threaded:
+            if (threaded and not self.be_silent):
                 print('Uploading:', filename)
 
             # Get an md5 of the file contents and compare it to whats up
