@@ -78,7 +78,7 @@ class Uploader(object):
         self.load_files()
 
         if self.confirm():
-            self.choose_upload_type()
+            self.prepare_upload()
 
 
     def login(self, login_token=None,):
@@ -266,7 +266,7 @@ class Uploader(object):
         jsoned = response.json()
 
         self.md5_ext = jsoned['md5']
- 
+
     def progressbar(self, it, prefix="", size=60, out=sys.stdout):
         count = len(it)
         def show(j):
@@ -292,70 +292,46 @@ class Uploader(object):
                 m.update(data)
         return m.hexdigest()
 
+    def prepare_upload(self):
+        threads = args.parallel_uploads
+        if (threads == 0):
+            threads = 1
 
-    def choose_upload_type(self):
-        amountOfThreads = args.parallel_uploads
-        amountOfFiles = len(self.files)
-        if (amountOfThreads > 1):
-            is_threaded = True
+        total_files = len(self.files)
+        # Remove already uploaded files from the list of files
+        self.check_md5()
+        not_skipped_files = len(self.files)
+
+        if not_skipped_files > 0:
             self.split_file_list(1)
-
-            fileIndex = 0
-            threads = []
-            with ThreadPoolExecutor(max_workers=amountOfThreads) as exe:
-                while (fileIndex < amountOfFiles):
-                    exe.submit(self.upload,fileIndex,is_threaded)
-                    fileIndex += 1
+            with ThreadPoolExecutor(max_workers=threads) as exe:
+                for i in range(not_skipped_files):
+                    exe.submit(self.upload,self.files[i])
                 # Wait for all tasks to finish before continuing
                 exe.shutdown(wait=True, cancel_futures=False)
-        else:
-            self.upload(0)
 
-        if (self.be_verbose and len(self.skipped_files) > 0):
-            print("\nThe following files were skipped because they were already uploaded:")
-            print(*sorted(self.skipped_files), sep='\n')
-        if (self.be_verbose):
-            print("Done")
+        if self.be_verbose and len(self.skipped_files) > 0:
+            if len(self.skipped_files > 0):
+                print('\nThe following files were skipped because they were already uploaded:')
+                print(*sorted(self.skipped_files), sep='\n')
+            print('Done')
 
         skipped = len(self.skipped_files)
         failed = len(self.failed_files)
-        uploaded = amountOfFiles - skipped - failed
-        print("Uploaded/Skipped/Failed/Total: %s/%s/%s/%s." % (uploaded,skipped,failed,amountOfFiles))
-
+        uploaded = max(total_files-skipped-failed, 0)
+        print('Uploaded/Skipped/Failed/Total: %s/%s/%s/%s.' % (uploaded,skipped,failed,total_files))
 
     def split_file_list(self, slices):
         self.files = [self.files[i * slices:(i + 1) * slices] for i in range((len(self.files) + slices - 1) // slices )]
 
 
-    def upload(self, fileIndex, threaded=False):
+    def upload(self, file_list):
         """
         Go and perform an upload of any files that haven't yet been uploaded
         """
-        self.__load_md5_int()
-        self.__load_md5_ext()
-        file_list = self.progressbar(self.files, "Processing: ", 60)
-        if threaded:
-            file_list = self.files[fileIndex]
-
         for filename in file_list:
-            if (threaded and not self.be_silent):
+            if not self.be_silent:
                 print('Uploading:', filename)
-
-            # Get an md5 of the file contents and compare it to whats up
-            # there already
-            if (not self.no_cache) and filename in self.md5_int:
-                file_md5 = self.md5_int[filename]
-            else:
-                if self.be_verbose:
-                    print('Calculating MD5 for file...')
-                file_md5 = self.calcmd5(filename)
-                self.md5_int[filename] = file_md5
-
-            if file_md5 in self.md5_ext:
-                self.skipped_files.append(filename)
-                if self.be_verbose:
-                    print("Skipped (already uploaded):")
-                continue
 
             upload_file = open(filename, 'rb')
 
@@ -388,9 +364,29 @@ class Uploader(object):
                 self.failed_files.append(filename)
                 raise ValueError('File upload failed.')
 
+    def check_md5(self):
+        self.__load_md5_int()
+        self.__load_md5_ext()
+
+        for filename in self.files[:]:
+            # Get an md5 of the file contents and compare it to whats up
+            # there already
+            if (not self.no_cache) and filename in self.md5_int:
+                file_md5 = self.md5_int[filename]
+            else:
+                if self.be_verbose:
+                    print('Calculating MD5 for file...')
+                file_md5 = self.calcmd5(filename)
+                self.md5_int[filename] = file_md5
+
+            if file_md5 in self.md5_ext:
+                self.skipped_files.append(filename)
+                # Removing the files is faster than later comparing
+                # which files are present in self.skipped_files
+                self.files.remove(filename)
+
         with open(self.md5_int_path, 'w') as fp:
             json.dump(self.md5_int, fp, indent = 2)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run this script in the parent directory of your music files. To acquire a login token, enable the \"Simple Uploaders\" app by visiting https://ibroadcast.com, logging in to your account, and clicking the \"Apps\" button in the side menu.\n")
