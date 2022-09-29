@@ -37,12 +37,12 @@ class Uploader(object):
     def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation, parallel_uploads):
         if verbose:
             sys.tracebacklimit = 1000
-        
+
         self.login_token = login_token
-        
+
         if directory:
             os.chdir(directory)
-        
+
         self.be_verbose = verbose
         self.be_silent = silent
         self.no_cache = no_cache
@@ -267,6 +267,40 @@ class Uploader(object):
 
         self.md5_ext = jsoned['md5']
 
+    def calcmd5(self, filePath="."):
+        with open(filePath, 'rb') as fh:
+            m = hashlib.md5()
+            while True:
+                data = fh.read(8192)
+                if not data:
+                    break
+                m.update(data)
+        return m.hexdigest()
+
+    def check_md5(self):
+        self.__load_md5_int()
+        self.__load_md5_ext()
+
+        for filename in self.files[:]:
+            # Get an md5 of the file contents and compare it to whats up
+            # there already
+            if (not self.no_cache) and filename in self.md5_int:
+                file_md5 = self.md5_int[filename]
+            else:
+                if self.be_verbose:
+                    print('Calculating MD5 for file...')
+                file_md5 = self.calcmd5(filename)
+                self.md5_int[filename] = file_md5
+
+            if file_md5 in self.md5_ext:
+                self.skipped_files.append(filename)
+                # Removing the files is faster than later comparing
+                # which files are present in self.skipped_files
+                self.files.remove(filename)
+
+        with open(self.md5_int_path, 'w') as fp:
+            json.dump(self.md5_int, fp, indent = 2)
+
     def progressbar(self, it, prefix="", size=60, out=sys.stdout):
         count = len(it)
         def show(j):
@@ -282,15 +316,8 @@ class Uploader(object):
         if (not self.be_verbose) and (not self.be_silent):
             print("\n", flush=True, file=out)
 
-    def calcmd5(self, filePath="."):
-        with open(filePath, 'rb') as fh:
-            m = hashlib.md5()
-            while True:
-                data = fh.read(8192)
-                if not data:
-                    break
-                m.update(data)
-        return m.hexdigest()
+    def split_file_list(self, slices):
+        self.files = [self.files[i * slices:(i + 1) * slices] for i in range((len(self.files) + slices - 1) // slices )]
 
     def prepare_upload(self):
         threads = args.parallel_uploads
@@ -320,10 +347,6 @@ class Uploader(object):
         failed = len(self.failed_files)
         uploaded = max(total_files-skipped-failed, 0)
         print('Uploaded/Skipped/Failed/Total: %s/%s/%s/%s.' % (uploaded,skipped,failed,total_files))
-
-    def split_file_list(self, slices):
-        self.files = [self.files[i * slices:(i + 1) * slices] for i in range((len(self.files) + slices - 1) // slices )]
-
 
     def upload(self, file_list):
         """
@@ -364,30 +387,6 @@ class Uploader(object):
                 self.failed_files.append(filename)
                 raise ValueError('File upload failed.')
 
-    def check_md5(self):
-        self.__load_md5_int()
-        self.__load_md5_ext()
-
-        for filename in self.files[:]:
-            # Get an md5 of the file contents and compare it to whats up
-            # there already
-            if (not self.no_cache) and filename in self.md5_int:
-                file_md5 = self.md5_int[filename]
-            else:
-                if self.be_verbose:
-                    print('Calculating MD5 for file...')
-                file_md5 = self.calcmd5(filename)
-                self.md5_int[filename] = file_md5
-
-            if file_md5 in self.md5_ext:
-                self.skipped_files.append(filename)
-                # Removing the files is faster than later comparing
-                # which files are present in self.skipped_files
-                self.files.remove(filename)
-
-        with open(self.md5_int_path, 'w') as fp:
-            json.dump(self.md5_int, fp, indent = 2)
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run this script in the parent directory of your music files. To acquire a login token, enable the \"Simple Uploaders\" app by visiting https://ibroadcast.com, logging in to your account, and clicking the \"Apps\" button in the side menu.\n")
     
@@ -395,7 +394,7 @@ if __name__ == '__main__':
     parser.add_argument('directory', type=str, nargs='?', help='Use this directory instead of the current one')
     parser.add_argument('-n', '--no-cache', action='store_true', help='Do not use local MD5 cache')
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-p', '--parallel-uploads', type=int, nargs='?', const=3, default=3, choices=range(0,6), metavar="0-6", help='Number of parallel uploads, 3 by default.')
+    parser.add_argument('-p', '--parallel-uploads', type=int, nargs='?', const=3, default=3, choices=range(0,6), metavar='0-6', help='Number of parallel uploads, 3 by default.')
     parser.add_argument('-s', '--silent', action='store_true', help='Be silent')
     parser.add_argument('-y', '--skip-confirmation', action='store_true', help='Skip confirmation dialogue')
 
