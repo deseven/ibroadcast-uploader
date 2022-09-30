@@ -281,22 +281,37 @@ class Uploader(object):
         self.__load_md5_int()
         self.__load_md5_ext()
 
-        for filename in self.files[:]:
+        calculated = False
+        current_path=''
+        file_list = self.files[:]
+        if not self.be_silent and not self.be_verbose:
+            file_list = self.progressbar(self.files[:], "Calculating MD5 hashes: ", 60)
+
+        for filename in file_list:
             # Get an md5 of the file contents and compare it to whats up
             # there already
             if (not self.no_cache) and filename in self.md5_int:
                 file_md5 = self.md5_int[filename]
             else:
-                if self.be_verbose:
-                    print('Calculating MD5 for file...')
+                calculated = True
+                if not self.be_silent and self.be_verbose:
+                    if os.path.dirname(filename) != current_path:
+                        current_path = os.path.dirname(filename)
+                        print('\nChecking directory %s...' % current_path)
+                    print('Calculating MD5 for file %s... ' % os.path.basename(filename), end='')
                 file_md5 = self.calcmd5(filename)
                 self.md5_int[filename] = file_md5
 
             if file_md5 in self.md5_ext:
                 self.skipped_files.append(filename)
+                if not self.be_silent and self.be_verbose and calculated:
+                    print('Skipping, already uploaded.')
                 # Removing the files is faster than later comparing
                 # which files are present in self.skipped_files
                 self.files.remove(filename)
+            elif not self.be_silent and self.be_verbose and calculated:
+                print()
+            calculated = False
 
         with open(self.md5_int_path, 'w') as fp:
             json.dump(self.md5_int, fp, indent = 2)
@@ -336,12 +351,6 @@ class Uploader(object):
                     exe.submit(self.upload,self.files[i])
                 # Wait for all tasks to finish before continuing
                 exe.shutdown(wait=True, cancel_futures=False)
-
-        if self.be_verbose and len(self.skipped_files) > 0:
-            if len(self.skipped_files > 0):
-                print('\nThe following files were skipped because they were already uploaded:')
-                print(*sorted(self.skipped_files), sep='\n')
-            print('Done')
 
         skipped = len(self.skipped_files)
         failed = len(self.failed_files)
