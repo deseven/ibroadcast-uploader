@@ -281,37 +281,50 @@ class Uploader(object):
         self.__load_md5_int()
         self.__load_md5_ext()
 
-        calculated = False
+        print_filename_again = True
         current_path=''
         file_list = self.files[:]
         if not self.be_silent and not self.be_verbose:
             file_list = self.progressbar(self.files[:], "Calculating MD5 hashes: ", 60)
 
         for filename in file_list:
+            file_base_name = ' "' + os.path.basename(filename) + '"'
+            if not self.be_silent and self.be_verbose:
+                if os.path.dirname(filename) != current_path:
+                    current_path = os.path.dirname(filename)
+                    print('\nChecking directory %s...' % current_path)
+
             # Get an md5 of the file contents and compare it to whats up
             # there already
             if (not self.no_cache) and filename in self.md5_int:
                 file_md5 = self.md5_int[filename]
             else:
-                calculated = True
+                # We don't want to print the filename later
+                # when telling the user it has been skipped,
+                # because it's being printed here already
+                print_filename_again = False
                 if not self.be_silent and self.be_verbose:
-                    if os.path.dirname(filename) != current_path:
-                        current_path = os.path.dirname(filename)
-                        print('\nChecking directory %s...' % current_path)
-                    print('Calculating MD5 for file %s... ' % os.path.basename(filename), end='')
+                    print('Calculating MD5 for file%s... ' % file_base_name, end='')
                 file_md5 = self.calcmd5(filename)
                 self.md5_int[filename] = file_md5
 
             if file_md5 in self.md5_ext:
                 self.skipped_files.append(filename)
-                if not self.be_silent and self.be_verbose and calculated:
-                    print('Skipping, already uploaded.')
+                if not self.be_silent and self.be_verbose:
+                    if not print_filename_again:
+                        file_base_name = ""
+                    print('Skipping%s, already uploaded.' % file_base_name)
                 # Removing the files is faster than later comparing
                 # which files are present in self.skipped_files
                 self.files.remove(filename)
-            elif not self.be_silent and self.be_verbose and calculated:
-                print()
-            calculated = False
+            elif not self.be_silent and self.be_verbose:
+                # Add a new line if the file has not been skipped and is not
+                # cached, because the last print doesn't include an end line
+                if not print_filename_again:
+                    print()
+                    continue
+                print('The MD5 for%s is cached, but the file has not been uploaded yet' % file_base_name)
+            print_filename_again = True
 
         with open(self.md5_int_path, 'w') as fp:
             json.dump(self.md5_int, fp, indent = 2)
@@ -331,9 +344,6 @@ class Uploader(object):
         if (not self.be_verbose) and (not self.be_silent):
             print("\n", flush=True, file=out)
 
-    def split_file_list(self, slices):
-        self.files = [self.files[i * slices:(i + 1) * slices] for i in range((len(self.files) + slices - 1) // slices )]
-
     def prepare_upload(self):
         threads = args.parallel_uploads
         if (threads == 0):
@@ -345,7 +355,6 @@ class Uploader(object):
         not_skipped_files = len(self.files)
 
         if not_skipped_files > 0:
-            self.split_file_list(1)
             with ThreadPoolExecutor(max_workers=threads) as exe:
                 for i in range(not_skipped_files):
                     exe.submit(self.upload,self.files[i])
@@ -357,48 +366,47 @@ class Uploader(object):
         uploaded = max(total_files-skipped-failed, 0)
         print('Uploaded/Skipped/Failed/Total: %s/%s/%s/%s.' % (uploaded,skipped,failed,total_files))
 
-    def upload(self, file_list):
+    def upload(self, filename):
         """
         Go and perform an upload of any files that haven't yet been uploaded
         """
-        for filename in file_list:
-            if not self.be_silent:
-                print('Uploading:', filename)
+        if not self.be_silent:
+            print('Uploading:', filename)
 
-            upload_file = open(filename, 'rb')
+        upload_file = open(filename, 'rb')
 
-            file_data = {
-                'file': upload_file,
-            }
+        file_data = {
+            'file': upload_file,
+        }
 
-            post_data = {
-                'user_id': self.user_id,
-                'token': self.token,
-                'file_path' : filename,
-                'method': self.CLIENT,
-            }
+        post_data = {
+            'user_id': self.user_id,
+            'token': self.token,
+            'file_path' : filename,
+            'method': self.CLIENT,
+        }
 
-            response = requests.post(
-                "https://upload.ibroadcast.com",
-                post_data,
-                files=file_data,
-            )
+        response = requests.post(
+            "https://upload.ibroadcast.com",
+            post_data,
+            files=file_data,
+        )
 
-            upload_file.close()
+        upload_file.close()
 
-            if not response.ok:
-                raise ServerError('Server returned bad status: ',
-                    response.status_code)
-            jsoned = response.json()
-            result = jsoned['result']
+        if not response.ok:
+            raise ServerError('Server returned bad status: ',
+                response.status_code)
+        jsoned = response.json()
+        result = jsoned['result']
 
-            if result is False:
-                self.failed_files.append(filename)
-                raise ValueError('File upload failed.')
+        if result is False:
+            self.failed_files.append(filename)
+            raise ValueError('File upload failed.')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run this script in the parent directory of your music files. To acquire a login token, enable the \"Simple Uploaders\" app by visiting https://ibroadcast.com, logging in to your account, and clicking the \"Apps\" button in the side menu.\n")
-    
+
     parser.add_argument('login_token', type=str, help='Login token')
     parser.add_argument('directory', type=str, nargs='?', help='Use this directory instead of the current one')
     parser.add_argument('-n', '--no-cache', action='store_true', help='Do not use local MD5 cache')
