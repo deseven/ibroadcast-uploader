@@ -359,7 +359,7 @@ class Uploader(object):
                 for i in range(not_skipped_files):
                     exe.submit(self.upload,self.files[i])
                 # Wait for all tasks to finish before continuing
-                exe.shutdown(wait=True, cancel_futures=False)
+                exe.shutdown(wait=True)
 
         skipped = len(self.skipped_files)
         failed = len(self.failed_files)
