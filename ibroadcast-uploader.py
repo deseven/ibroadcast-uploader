@@ -346,9 +346,6 @@ class Uploader(object):
 
     def prepare_upload(self):
         threads = args.parallel_uploads
-        if (threads == 0):
-            threads = 1
-
         total_files = len(self.files)
         # Remove already uploaded files from the list of files
         self.check_md5()
@@ -411,7 +408,7 @@ if __name__ == '__main__':
     parser.add_argument('directory', type=str, nargs='?', help='Use this directory instead of the current one')
     parser.add_argument('-n', '--no-cache', action='store_true', help='Do not use local MD5 cache')
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-p', '--parallel-uploads', type=int, nargs='?', const=3, default=3, choices=range(0,6), metavar='0-6', help='Number of parallel uploads, 3 by default.')
+    parser.add_argument('-p', '--parallel-uploads', type=int, nargs='?', const=3, default=3, choices=range(1,7), metavar='1-6', help='Number of parallel uploads, 3 by default.')
     parser.add_argument('-s', '--silent', action='store_true', help='Be silent')
     parser.add_argument('-y', '--skip-confirmation', action='store_true', help='Skip confirmation dialogue')
 
