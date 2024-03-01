@@ -28,13 +28,13 @@ class Uploader(object):
     Class for uploading content to iBroadcast.
     """
 
-    VERSION = '0.5'
+    VERSION = '0.6'
     CLIENT = 'python 3 uploader script'
     DEVICE_NAME = 'python 3 uploader script'
     USER_AGENT = 'ibroadcast-uploader/' + VERSION
 
 
-    def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation, parallel_uploads):
+    def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation, parallel_uploads, reupload, tag, playlist):
         if verbose:
             sys.tracebacklimit = 1000
 
@@ -58,6 +58,9 @@ class Uploader(object):
         self.md5_int_path = None
         self.md5_int = None
         self.md5_ext = None
+        self.reupload = reupload
+        self.tag = tag
+        self.playlist = playlist
 
     def process(self):
         try:
@@ -309,6 +312,8 @@ class Uploader(object):
                 self.md5_int[filename] = file_md5
 
             if file_md5 in self.md5_ext:
+                if self.reupload is True:
+                    continue
                 self.skipped_files.append(filename)
                 if not self.be_silent and self.be_verbose:
                     if not print_filename_again:
@@ -381,6 +386,8 @@ class Uploader(object):
             'token': self.token,
             'file_path' : filename,
             'method': self.CLIENT,
+            'tag-name': self.tag,
+            'playlist-name': self.playlist
         }
 
         response = requests.post(
@@ -411,8 +418,11 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parallel-uploads', type=int, nargs='?', const=3, default=3, choices=range(1,7), metavar='1-6', help='Number of parallel uploads, 3 by default.')
     parser.add_argument('-s', '--silent', action='store_true', help='Be silent')
     parser.add_argument('-y', '--skip-confirmation', action='store_true', help='Skip confirmation dialogue')
+    parser.add_argument('-l', '--playlist', type=str, help='Add uploaded files to this playlist')
+    parser.add_argument('-t', '--tag', type=str, help='Apply this tag to the uploaded files')
+    parser.add_argument('-r', '--reupload', action='store_true', help='Force re-uploading files')
 
     args = parser.parse_args()
-    uploader = Uploader(args.login_token,args.directory,args.no_cache,args.verbose,args.silent,args.skip_confirmation,args.parallel_uploads)
+    uploader = Uploader(args.login_token,args.directory,args.no_cache,args.verbose,args.silent,args.skip_confirmation,args.parallel_uploads, args.playlist, args.tag, args.reupload)
 
     uploader.process()
