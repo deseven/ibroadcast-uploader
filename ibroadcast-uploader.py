@@ -34,7 +34,7 @@ class Uploader(object):
     USER_AGENT = 'ibroadcast-uploader/' + VERSION
 
 
-    def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation, parallel_uploads, reupload, tag, playlist):
+    def __init__(self, login_token, directory, no_cache, verbose, silent, skip_confirmation, parallel_uploads, playlist, tag, reupload):
         if verbose:
             sys.tracebacklimit = 1000
 
@@ -311,9 +311,7 @@ class Uploader(object):
                 file_md5 = self.calcmd5(filename)
                 self.md5_int[filename] = file_md5
 
-            if file_md5 in self.md5_ext:
-                if self.reupload is True:
-                    continue
+            if file_md5 in self.md5_ext and self.reupload is False:
                 self.skipped_files.append(filename)
                 if not self.be_silent and self.be_verbose:
                     if not print_filename_again:
