@@ -28,7 +28,7 @@ class Uploader(object):
     Class for uploading content to iBroadcast.
     """
 
-    VERSION = '0.6'
+    VERSION = '0.6.1'
     CLIENT = 'python 3 uploader script'
     DEVICE_NAME = 'python 3 uploader script'
     USER_AGENT = 'ibroadcast-uploader/' + VERSION
@@ -61,6 +61,7 @@ class Uploader(object):
         self.reupload = reupload
         self.tag = tag
         self.playlist = playlist
+        self.parallel_uploads = parallel_uploads
 
     def process(self):
         try:
@@ -348,7 +349,7 @@ class Uploader(object):
             print("\n", flush=True, file=out)
 
     def prepare_upload(self):
-        threads = args.parallel_uploads
+        threads = self.parallel_uploads
         total_files = len(self.files)
         # Remove already uploaded files from the list of files
         self.check_md5()
